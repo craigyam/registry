@@ -15,6 +15,8 @@
 package store
 
 import (
+	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,38 +24,39 @@ import (
 	"github.com/rcrowley/go-metrics"
 
 	"github.com/amalgam8/registry/auth"
+	"github.com/amalgam8/registry/utils/database"
 	"github.com/amalgam8/registry/utils/logging"
 )
 
-var defaultInMemoryConfig = &inMemoryConfig{DefaultConfig.DefaultTTL, DefaultConfig.MinimumTTL, DefaultConfig.MaximumTTL, DefaultConfig.NamespaceCapacity}
-
-type inMemoryConfig struct {
+type externalConfig struct {
 	defaultTTL time.Duration
 	minimumTTL time.Duration
 	maximumTTL time.Duration
 
 	namespaceCapacity int
+
+	store    string
+	address  string
+	password string
 }
 
-type inMemoryFactory struct {
-	conf *inMemoryConfig
+type externalFactory struct {
+	conf *externalConfig
 }
 
-func newInMemoryFactory(conf *inMemoryConfig) *inMemoryFactory {
-	return &inMemoryFactory{conf: conf}
+func newExternalFactory(conf *externalConfig) CatalogFactory {
+	return &externalFactory{conf: conf}
 }
 
-func (f *inMemoryFactory) CreateCatalog(namespace auth.Namespace) (Catalog, error) {
-	return newInMemoryCatalog(f.conf), nil
+func (f *externalFactory) CreateCatalog(namespace auth.Namespace) (Catalog, error) {
+	return newExternalCatalog(f.conf, namespace)
 }
 
-type inMemoryService map[string]*ServiceInstance
-
-type inMemoryCatalog struct {
-	services  map[string]inMemoryService
-	instances map[string]*ServiceInstance
-	conf      *inMemoryConfig
+type externalCatalog struct {
+	conf      *externalConfig
 	logger    *log.Entry
+	db        ExternalRegistry
+	namespace auth.Namespace
 
 	// Metrics
 	instancesMetric         metrics.Counter
@@ -67,20 +70,31 @@ type inMemoryCatalog struct {
 	sync.RWMutex
 }
 
-func newInMemoryCatalog(conf *inMemoryConfig) *inMemoryCatalog {
+func newExternalCatalog(conf *externalConfig, namespace auth.Namespace) (Catalog, error) {
 	if conf == nil {
-		conf = defaultInMemoryConfig
+		// If conf is null, we'll error out when checking the store.  Just error here in this case.
+		return nil, fmt.Errorf("Config cannot be nil")
 	}
 
 	counterFactory := func() metrics.Counter { return metrics.NewCounter() }
 	meterFactory := func() metrics.Meter { return metrics.NewMeter() }
 	histogramFactory := func() metrics.Histogram { return metrics.NewHistogram(metrics.NewExpDecaySample(1028, 0.015)) }
 
-	catalog := &inMemoryCatalog{
-		services:  make(map[string]inMemoryService),
-		instances: make(map[string]*ServiceInstance),
+	var db database.Database
+	var reg ExternalRegistry
+
+	if conf.store == "redis" {
+		db = database.NewRedisDB(namespace, conf.address, conf.password)
+		reg = NewRedisRegistry(db)
+	} else {
+		return nil, fmt.Errorf("External store %s is not supported", conf.store)
+	}
+
+	catalog := &externalCatalog{
 		conf:      conf,
 		logger:    logging.GetLogger(module),
+		namespace: namespace,
+		db:        reg,
 
 		instancesMetric:         metrics.GetOrRegister(instancesMetricName, counterFactory).(metrics.Counter),
 		expirationMetric:        metrics.GetOrRegister(expirationMetricName, meterFactory).(metrics.Meter),
@@ -90,10 +104,17 @@ func newInMemoryCatalog(conf *inMemoryConfig) *inMemoryCatalog {
 		tagsLengthMetric:        metrics.GetOrRegister(tagsLengthMetricName, histogramFactory).(metrics.Histogram),
 		tagsInstancesMetric:     metrics.GetOrRegister(tagsInstancesMetricName, counterFactory).(metrics.Counter),
 	}
-	return catalog
+
+	// Need to check if any entries in the DB have expired
+	hashKeys, _ := db.ReadKeys()
+	for _, value := range hashKeys {
+		catalog.checkIfExpired(strings.Split(value, ".")[0])
+	}
+
+	return catalog, nil
 }
 
-func (imc *inMemoryCatalog) Register(si *ServiceInstance) (*ServiceInstance, error) {
+func (ec *externalCatalog) Register(si *ServiceInstance) (*ServiceInstance, error) {
 	serviceName := si.ServiceName
 	if serviceName == "" {
 		return nil, NewError(ErrorBadRequest, "Empty service name", "")
@@ -123,49 +144,54 @@ func (imc *inMemoryCatalog) Register(si *ServiceInstance) (*ServiceInstance, err
 
 	newSI := si.DeepClone()
 	newSI.ID = instanceID
+
 	if newSI.TTL == 0 {
-		newSI.TTL = imc.conf.defaultTTL
-	} else if newSI.TTL < imc.conf.minimumTTL {
-		newSI.TTL = imc.conf.minimumTTL
-	} else if newSI.TTL > imc.conf.maximumTTL {
-		newSI.TTL = imc.conf.maximumTTL
+		newSI.TTL = ec.conf.defaultTTL
+	} else if newSI.TTL < ec.conf.minimumTTL {
+		newSI.TTL = ec.conf.minimumTTL
+	} else if newSI.TTL > ec.conf.maximumTTL {
+		newSI.TTL = ec.conf.maximumTTL
 	}
 
-	// isReplication indicates whether this is a replication request or a client request
-	isReplication := true
 	if newSI.RegistrationTime.IsZero() {
 		newSI.RegistrationTime = time.Now()
-		isReplication = false
+		newSI.LastRenewal = newSI.RegistrationTime
 	}
 
-	imc.Lock()
-	defer imc.Unlock()
+	ec.Lock()
+	defer ec.Unlock()
 
 	// Existing instances are simply overwritten, but need to take into account for capacity validation and metrics collection.
-	existingSI, alreadyExists := imc.instances[instanceID]
-	if alreadyExists {
-		imc.logger.Debugf("Overwriting existing instance ID %s due to re-registration", instanceID)
+	instance, err := ec.db.ReadServiceInstanceByInstID(instanceID)
+	if err != nil {
+		return nil, err
+	}
+	var alreadyExists bool
+	if instance.ID != "" {
+		alreadyExists = true
+		ec.logger.Debugf("Overwriting existing instance ID %s due to re-registration", instanceID)
 	}
 
 	// Capacity validation - we don't check capacity for replication requests nor reregister requests
-	if !isReplication && !alreadyExists && imc.conf.namespaceCapacity >= 0 {
-		if len(imc.instances) >= imc.conf.namespaceCapacity {
-			imc.logger.Warnf("Failed to register service instance %s becuase quota exceeded (%d)", serviceName, len(imc.instances))
+	if !alreadyExists && ec.conf.namespaceCapacity >= 0 {
+		hashKeys, err := ec.db.ReadKeys()
+		if err != nil {
+			return nil, err
+		}
+		if len(hashKeys) >= ec.conf.namespaceCapacity {
+			ec.logger.Warnf("Failed to register service instance %s because quota exceeded (%d)", serviceName, len(hashKeys))
 			return nil, NewError(ErrorNamespaceQuotaExceeded, "Quota exceeded", "")
 		}
 
 	}
 
-	service, exists := imc.services[serviceName]
-	if !exists {
-		service = make(map[string]*ServiceInstance)
-		imc.services[serviceName] = service
+	// Write the JSON registration data to the database
+	err = ec.db.InsertServiceInstance(newSI)
+	if err != nil {
+		return nil, err
 	}
 
-	service[instanceID] = newSI
-	imc.instances[instanceID] = newSI
-
-	imc.renew(newSI)
+	ec.renew(newSI)
 
 	metadataLength := len(newSI.Metadata)
 	tagsLength := len(newSI.Tags)
@@ -174,48 +200,48 @@ func (imc *inMemoryCatalog) Register(si *ServiceInstance) (*ServiceInstance, err
 	if !alreadyExists {
 		// For a newly registered instance, simply inc the instances counter,
 		// and if metadata/tags are used, inc the metadata/tags counter respectively
-		imc.instancesMetric.Inc(1)
+		ec.instancesMetric.Inc(1)
 		if metadataLength > 0 {
-			imc.metadataInstancesMetric.Inc(1)
+			ec.metadataInstancesMetric.Inc(1)
 		}
 		if tagsLength > 0 {
-			imc.tagsInstancesMetric.Inc(1)
+			ec.tagsInstancesMetric.Inc(1)
 		}
 	} else {
 		// For overwriting an existing instance, no need to inc the instances counter,\
 		// but the metadata/tags counter are inc'ed/dec'ed as needed
-		prevMetadataLength := len(existingSI.Metadata)
-		prevTagsLength := len(existingSI.Tags)
+		prevMetadataLength := len(instance.Metadata)
+		prevTagsLength := len(instance.Tags)
 
 		if prevMetadataLength > 0 && metadataLength == 0 {
-			imc.metadataInstancesMetric.Dec(1)
+			ec.metadataInstancesMetric.Dec(1)
 		} else if prevMetadataLength == 0 && metadataLength > 0 {
-			imc.metadataInstancesMetric.Inc(1)
+			ec.metadataInstancesMetric.Inc(1)
 		}
 
 		if prevTagsLength > 0 && tagsLength == 0 {
-			imc.tagsInstancesMetric.Dec(1)
+			ec.tagsInstancesMetric.Dec(1)
 		} else if prevTagsLength == 0 && tagsLength > 0 {
-			imc.tagsInstancesMetric.Inc(1)
+			ec.tagsInstancesMetric.Inc(1)
 		}
 	}
 
 	// Update the metadata/tags histogram metrics
 	if metadataLength > 0 {
-		imc.metadataLengthMetric.Update(int64(metadataLength))
+		ec.metadataLengthMetric.Update(int64(metadataLength))
 	}
 	if tagsLength > 0 {
-		imc.tagsLengthMetric.Update(int64(tagsLength))
+		ec.tagsLengthMetric.Update(int64(tagsLength))
 	}
 
 	return newSI.DeepClone(), nil
 }
 
-func (imc *inMemoryCatalog) Deregister(instanceID string) (*ServiceInstance, error) {
-	imc.Lock()
-	defer imc.Unlock()
+func (ec *externalCatalog) Deregister(instanceID string) (*ServiceInstance, error) {
+	ec.Lock()
+	defer ec.Unlock()
 
-	instance := imc.delete(instanceID)
+	instance := ec.delete(instanceID)
 	if instance == nil {
 		return nil, NewError(ErrorNoSuchServiceInstance, "no such service instance", instanceID)
 	}
@@ -223,75 +249,112 @@ func (imc *inMemoryCatalog) Deregister(instanceID string) (*ServiceInstance, err
 	return instance, nil
 }
 
-func (imc *inMemoryCatalog) Renew(instanceID string) (*ServiceInstance, error) {
-	imc.RLock()
-	defer imc.RUnlock()
+func (ec *externalCatalog) Renew(instanceID string) (*ServiceInstance, error) {
+	ec.Lock()
+	defer ec.Unlock()
 
-	instance, exists := imc.instances[instanceID]
-	if !exists {
+	startTime := time.Now()
+	fmt.Println("Renew startTime: ", startTime)
+	si, err := ec.db.ReadServiceInstanceByInstID(instanceID)
+	endTime := time.Now()
+	fmt.Println("Renew endTime: ", endTime)
+	fmt.Println("Elapsed time: ", endTime.Sub(startTime))
+	if err != nil {
+		return nil, err
+	}
+	if si.ID == "" {
 		return nil, NewError(ErrorNoSuchServiceInstance, "no such service instance", instanceID)
 	}
 
-	imc.renew(instance)
-	return instance.DeepClone(), nil
+	si.LastRenewal = time.Now()
+	err = ec.db.InsertServiceInstance(si)
+	if err != nil {
+		return nil, err
+	}
+
+	ec.renew(si)
+
+	return si.DeepClone(), nil
 }
 
-func (imc *inMemoryCatalog) SetStatus(instanceID, status string) (*ServiceInstance, error) {
-	imc.Lock()
-	defer imc.Unlock()
+func (ec *externalCatalog) SetStatus(instanceID, status string) (*ServiceInstance, error) {
+	ec.Lock()
+	defer ec.Unlock()
 
-	instance, exists := imc.instances[instanceID]
-	if !exists {
+	si, err := ec.db.ReadServiceInstanceByInstID(instanceID)
+	if err != nil {
+		return nil, err
+	}
+	if si.ID == "" {
 		return nil, NewError(ErrorNoSuchServiceInstance, "no such service instance", instanceID)
 	}
 
-	instance.Status = status
-	imc.renew(instance)
-	return instance.DeepClone(), nil
+	si.Status = status
+	err = ec.db.InsertServiceInstance(si)
+	if err != nil {
+		return nil, err
+	}
+
+	ec.renew(si)
+
+	return si.DeepClone(), nil
 }
 
-func (imc *inMemoryCatalog) List(serviceName string, predicate Predicate) ([]*ServiceInstance, error) {
-	imc.RLock()
-	defer imc.RUnlock()
+func (ec *externalCatalog) List(serviceName string, predicate Predicate) ([]*ServiceInstance, error) {
+	ec.RLock()
+	defer ec.RUnlock()
 
-	service := imc.services[serviceName]
+	siKey := fmt.Sprintf("*.%s", serviceName)
 
-	if nil == service {
+	service, err := ec.db.ListServiceInstancesByKey(siKey)
+	if err != nil {
+		return nil, err
+	}
+	if len(service) == 0 {
 		return nil, NewError(ErrorNoSuchServiceName, "no such service", serviceName)
 	}
 
 	instanceCollection := make([]*ServiceInstance, 0, len(service))
-	for _, instance := range service {
-		if predicate == nil || predicate(instance) {
-			instanceCollection = append(instanceCollection, instance.DeepClone())
+	for _, value := range service {
+		if predicate == nil || predicate(value) {
+			instanceCollection = append(instanceCollection, value)
 		}
 	}
 
 	return instanceCollection, nil
 }
 
-func (imc *inMemoryCatalog) Instance(instanceID string) (*ServiceInstance, error) {
-	imc.RLock()
-	defer imc.RUnlock()
+func (ec *externalCatalog) Instance(instanceID string) (*ServiceInstance, error) {
+	ec.RLock()
+	defer ec.RUnlock()
 
-	instance, exists := imc.instances[instanceID]
-	if !exists {
+	si, err := ec.db.ReadServiceInstanceByInstID(instanceID)
+	if err != nil {
+		return nil, err
+	}
+	if si.ID == "" {
 		return nil, NewError(ErrorNoSuchServiceInstance, "no such service instance", instanceID)
 	}
 
-	return instance.DeepClone(), nil
+	return si.DeepClone(), nil
 }
 
-func (imc *inMemoryCatalog) ListServices(predicate Predicate) []*Service {
-	imc.RLock()
-	defer imc.RUnlock()
+func (ec *externalCatalog) ListServices(predicate Predicate) []*Service {
+	ec.RLock()
+	defer ec.RUnlock()
 
-	services := make([]*Service, 0, len(imc.services))
-	for service, instances := range imc.services {
-		for _, instance := range instances {
+	serviceMap := make(map[string]ServiceInstanceMap)
+	services := make([]*Service, 0, len(serviceMap))
+
+	serviceMap, err := ec.db.ListAllServiceInstances()
+	if err != nil {
+		return services
+	}
+
+	for serviceName, service := range serviceMap {
+		for _, instance := range service {
 			if predicate == nil || predicate(instance) {
-				services = append(services, &Service{ServiceName: service})
-				break
+				services = append(services, &Service{ServiceName: serviceName})
 			}
 		}
 	}
@@ -299,16 +362,18 @@ func (imc *inMemoryCatalog) ListServices(predicate Predicate) []*Service {
 	return services
 }
 
-func (imc *inMemoryCatalog) checkIfExpired(instanceID string) {
-	var instance *ServiceInstance
-	func() {
-		// Ugly trick to make sure RUnlock() is called in case map lookup fails.
-		imc.RLock()
-		defer imc.RUnlock()
-		instance = imc.instances[instanceID]
-	}()
+func (ec *externalCatalog) checkIfExpired(instanceID string) {
+	ec.Lock()
+	defer ec.Unlock()
 
+	instance, err := ec.db.ReadServiceInstanceByInstID(instanceID)
+	if err != nil {
+		fmt.Println("err: ", err)
+		ec.logger.Debugf("Error reading instance data for instance ID %s", instanceID)
+		return
+	}
 	if instance == nil {
+		ec.logger.Debugf("Instance data not found for instance ID %s", instanceID)
 		return
 	}
 
@@ -319,62 +384,56 @@ func (imc *inMemoryCatalog) checkIfExpired(instanceID string) {
 
 	timeSinceHeartbeat := time.Now().Sub(instance.LastRenewal)
 	if timeSinceHeartbeat > instance.TTL {
-
 		// Since timeSinceHeartbeat was calculated based
 		// on a possibly stale value of inst.LastRenewal,
 		// we sync our goroutine and then recalculate it.
 		// This should hopefully sync other goroutines running on the same CPU.
-		imc.Lock()
-		defer imc.Unlock()
 
 		timeSinceHeartbeat = time.Now().Sub(instance.LastRenewal)
 		if timeSinceHeartbeat <= instance.TTL {
 			return
 		}
 
-		imc.logger.Debugf("Instance ID %s is expired", instance.ID)
-		imc.delete(instanceID)
-		imc.expirationMetric.Mark(1)
+		ec.logger.Debugf("Instance ID %s is expired", instance.ID)
+		ec.delete(instanceID)
+		ec.expirationMetric.Mark(1)
 	}
 }
 
 // delete deletes the specified instanceID from the catalog internal datastructures.
 // It assumes the catalog's write-lock is acquired by the calling goroutine.
-func (imc *inMemoryCatalog) delete(instanceID string) *ServiceInstance {
-	instance, exists := imc.instances[instanceID]
-	if !exists {
+func (ec *externalCatalog) delete(instanceID string) *ServiceInstance {
+	instance, err := ec.db.ReadServiceInstanceByInstID(instanceID)
+	if err != nil || instance.ID == "" {
 		return nil
 	}
-	serviceName := instance.ServiceName
 
-	delete(imc.services[serviceName], instanceID)
-	if len(imc.services[serviceName]) == 0 {
-		delete(imc.services, serviceName)
+	hDel, _ := ec.db.DeleteServiceInstance(fmt.Sprintf("%s.%s", instance.ID, instance.ServiceName))
+	if hDel == 0 {
+		return nil
 	}
 
-	delete(imc.instances, instanceID)
-
 	lifetime := time.Now().Sub(instance.RegistrationTime)
-	imc.lifetimeMetric.Update(int64(lifetime))
+	ec.lifetimeMetric.Update(int64(lifetime))
 
 	hadMetadata := len(instance.Metadata) > 0
 	hadTags := len(instance.Tags) > 0
 
 	if hadMetadata {
-		imc.metadataInstancesMetric.Dec(1)
+		ec.metadataInstancesMetric.Dec(1)
 	}
 	if hadTags {
-		imc.tagsInstancesMetric.Dec(1)
+		ec.tagsInstancesMetric.Dec(1)
 	}
 
-	imc.instancesMetric.Dec(1)
+	ec.instancesMetric.Dec(1)
 	return instance
 }
 
-func (imc *inMemoryCatalog) renew(instance *ServiceInstance) {
+func (ec *externalCatalog) renew(instance *ServiceInstance) {
 	instance.LastRenewal = time.Now()
 
 	time.AfterFunc(instance.TTL, func() {
-		imc.checkIfExpired(instance.ID)
+		ec.checkIfExpired(instance.ID)
 	})
 }
