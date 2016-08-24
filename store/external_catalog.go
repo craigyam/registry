@@ -21,6 +21,7 @@ import (
 	"time"
 
 	log "github.com/Sirupsen/logrus"
+	"github.com/garyburd/redigo/redis"
 	"github.com/rcrowley/go-metrics"
 
 	"github.com/amalgam8/registry/auth"
@@ -42,14 +43,40 @@ type externalConfig struct {
 
 type externalFactory struct {
 	conf *externalConfig
+	pool *redis.Pool
 }
 
 func newExternalFactory(conf *externalConfig) CatalogFactory {
+	if conf.store == "redis" {
+		pool := &redis.Pool{
+			MaxIdle:     10,
+			IdleTimeout: 240 * time.Second,
+			Dial: func() (redis.Conn, error) {
+				c, err := redis.Dial("tcp", conf.address)
+				if err != nil {
+					return nil, err
+				}
+				if _, err := c.Do("AUTH", conf.password); err != nil {
+					c.Close()
+					return nil, err
+				}
+				return c, err
+			},
+			TestOnBorrow: func(c redis.Conn, t time.Time) error {
+				if time.Since(t) < time.Minute {
+					return nil
+				}
+				_, err := c.Do("PING")
+				return err
+			},
+		}
+		return &externalFactory{conf: conf, pool: pool}
+	}
 	return &externalFactory{conf: conf}
 }
 
 func (f *externalFactory) CreateCatalog(namespace auth.Namespace) (Catalog, error) {
-	return newExternalCatalog(f.conf, namespace)
+	return newExternalCatalog(f.conf, namespace, f.pool)
 }
 
 type externalCatalog struct {
@@ -70,7 +97,7 @@ type externalCatalog struct {
 	sync.RWMutex
 }
 
-func newExternalCatalog(conf *externalConfig, namespace auth.Namespace) (Catalog, error) {
+func newExternalCatalog(conf *externalConfig, namespace auth.Namespace, pool *redis.Pool) (Catalog, error) {
 	if conf == nil {
 		// If conf is null, we'll error out when checking the store.  Just error here in this case.
 		return nil, fmt.Errorf("Config cannot be nil")
@@ -84,7 +111,11 @@ func newExternalCatalog(conf *externalConfig, namespace auth.Namespace) (Catalog
 	var reg ExternalRegistry
 
 	if conf.store == "redis" {
-		db = database.NewRedisDB(namespace, conf.address, conf.password)
+		if pool != nil {
+			db = database.NewRedisDBWithPool(namespace, pool)
+		} else {
+			db = database.NewRedisDB(namespace, conf.address, conf.password)
+		}
 		reg = NewRedisRegistry(db)
 	} else {
 		return nil, fmt.Errorf("External store %s is not supported", conf.store)

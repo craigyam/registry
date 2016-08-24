@@ -24,6 +24,7 @@ import (
 
 type redisDB struct {
 	conn      redis.Conn
+	pool      *redis.Pool
 	logger    *log.Entry
 	address   string
 	password  string
@@ -34,6 +35,7 @@ type redisDB struct {
 func NewRedisDB(namespace auth.Namespace, address string, password string) Database {
 	db := &redisDB{
 		conn:      nil,
+		pool:      nil,
 		address:   address,
 		password:  password,
 		namespace: namespace,
@@ -47,6 +49,7 @@ func NewRedisDB(namespace auth.Namespace, address string, password string) Datab
 func NewRedisDBWithConn(conn redis.Conn, namespace auth.Namespace, address string, password string) Database {
 	db := &redisDB{
 		conn:      conn,
+		pool:      nil,
 		address:   address,
 		password:  password,
 		namespace: namespace,
@@ -57,13 +60,36 @@ func NewRedisDBWithConn(conn redis.Conn, namespace auth.Namespace, address strin
 
 }
 
+// NewRedisDBWithPool returns an instance of a Redis database using an existing connection pool
+func NewRedisDBWithPool(namespace auth.Namespace, pool *redis.Pool) Database {
+	db := &redisDB{
+		conn:      nil,
+		pool:      pool,
+		address:   "",
+		password:  "",
+		namespace: namespace,
+		logger:    logging.GetLogger(module),
+	}
+
+	return db
+
+}
+
 func (rdb *redisDB) connect() redis.Conn {
-	// Connect to Redis
-	conn, _ := redis.Dial("tcp", rdb.address)
-	_, err := conn.Do("AUTH", rdb.password)
-	if err != nil {
-		conn.Close()
-		panic(err)
+	var conn redis.Conn
+	if rdb.pool == nil {
+		// Connect to Redis
+		conn, err := redis.Dial("tcp", rdb.address)
+		if err != nil {
+			panic(err)
+		}
+		_, err = conn.Do("AUTH", rdb.password)
+		if err != nil {
+			conn.Close()
+			panic(err)
+		}
+	} else {
+		conn = rdb.pool.Get()
 	}
 	return conn
 }
