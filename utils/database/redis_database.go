@@ -18,42 +18,38 @@ import (
 	log "github.com/Sirupsen/logrus"
 	"github.com/garyburd/redigo/redis"
 
-	"github.com/amalgam8/registry/auth"
 	"github.com/amalgam8/registry/utils/logging"
 )
 
 type redisDB struct {
-	conn      redis.Conn
-	pool      *redis.Pool
-	logger    *log.Entry
-	address   string
-	password  string
-	namespace auth.Namespace
+	conn     redis.Conn
+	pool     *redis.Pool
+	logger   *log.Entry
+	address  string
+	password string
 }
 
 // NewRedisDB returns an instance of a Redis database
-func NewRedisDB(namespace auth.Namespace, address string, password string) Database {
+func NewRedisDB(address string, password string) Database {
 	db := &redisDB{
-		conn:      nil,
-		pool:      nil,
-		address:   address,
-		password:  password,
-		namespace: namespace,
-		logger:    logging.GetLogger(module),
+		conn:     nil,
+		pool:     nil,
+		address:  address,
+		password: password,
+		logger:   logging.GetLogger(module),
 	}
 
 	return db
 }
 
 // NewRedisDBWithConn returns an instance of a Redis database using an existing connection
-func NewRedisDBWithConn(conn redis.Conn, namespace auth.Namespace, address string, password string) Database {
+func NewRedisDBWithConn(conn redis.Conn, address string, password string) Database {
 	db := &redisDB{
-		conn:      conn,
-		pool:      nil,
-		address:   address,
-		password:  password,
-		namespace: namespace,
-		logger:    logging.GetLogger(module),
+		conn:     conn,
+		pool:     nil,
+		address:  address,
+		password: password,
+		logger:   logging.GetLogger(module),
 	}
 
 	return db
@@ -61,14 +57,13 @@ func NewRedisDBWithConn(conn redis.Conn, namespace auth.Namespace, address strin
 }
 
 // NewRedisDBWithPool returns an instance of a Redis database using an existing connection pool
-func NewRedisDBWithPool(namespace auth.Namespace, pool *redis.Pool) Database {
+func NewRedisDBWithPool(pool *redis.Pool) Database {
 	db := &redisDB{
-		conn:      nil,
-		pool:      pool,
-		address:   "",
-		password:  "",
-		namespace: namespace,
-		logger:    logging.GetLogger(module),
+		conn:     nil,
+		pool:     pool,
+		address:  "",
+		password: "",
+		logger:   logging.GetLogger(module),
 	}
 
 	return db
@@ -77,9 +72,10 @@ func NewRedisDBWithPool(namespace auth.Namespace, pool *redis.Pool) Database {
 
 func (rdb *redisDB) connect() (redis.Conn, error) {
 	var conn redis.Conn
+	var err error
 	if rdb.pool == nil {
 		// Connect to Redis
-		conn, err := redis.Dial("tcp", rdb.address)
+		conn, err = redis.Dial("tcp", rdb.address)
 		if err != nil {
 			return nil, err
 		}
@@ -94,7 +90,7 @@ func (rdb *redisDB) connect() (redis.Conn, error) {
 	return conn, nil
 }
 
-func (rdb *redisDB) ReadKeys() ([]string, error) {
+func (rdb *redisDB) ReadKeys(hashname string) ([]string, error) {
 	var err error
 	conn := rdb.conn
 	if rdb.conn == nil {
@@ -105,12 +101,12 @@ func (rdb *redisDB) ReadKeys() ([]string, error) {
 		defer conn.Close()
 	}
 
-	hashKeys, err := redis.Strings(conn.Do("HKEYS", rdb.namespace.String()))
+	hashKeys, err := redis.Strings(conn.Do("HKEYS", hashname))
 
 	return hashKeys, err
 }
 
-func (rdb *redisDB) ReadEntry(key string) (string, error) {
+func (rdb *redisDB) ReadEntry(hashname string, key string) (string, error) {
 	var err error
 	conn := rdb.conn
 	if rdb.conn == nil {
@@ -121,12 +117,12 @@ func (rdb *redisDB) ReadEntry(key string) (string, error) {
 		defer conn.Close()
 	}
 
-	entry, err := redis.String(conn.Do("HGET", rdb.namespace.String(), key))
+	entry, err := redis.String(conn.Do("HGET", hashname, key))
 
 	return entry, err
 }
 
-func (rdb *redisDB) ReadAllEntries() (map[string]string, error) {
+func (rdb *redisDB) ReadAllEntries(hashname string) (map[string]string, error) {
 	var err error
 	conn := rdb.conn
 	if rdb.conn == nil {
@@ -137,12 +133,12 @@ func (rdb *redisDB) ReadAllEntries() (map[string]string, error) {
 		defer conn.Close()
 	}
 
-	entries, err := redis.StringMap(conn.Do("HGETALL", rdb.namespace.String()))
+	entries, err := redis.StringMap(conn.Do("HGETALL", hashname))
 
 	return entries, err
 }
 
-func (rdb *redisDB) ReadAllMatchingEntries(match string) (map[string]string, error) {
+func (rdb *redisDB) ReadAllMatchingEntries(hashname string, match string) (map[string]string, error) {
 	var err error
 	conn := rdb.conn
 	if rdb.conn == nil {
@@ -160,7 +156,7 @@ func (rdb *redisDB) ReadAllMatchingEntries(match string) (map[string]string, err
 	var matches = make(map[string]string)
 
 	for {
-		items, err := redis.Values(conn.Do("HSCAN", rdb.namespace.String(), cursor, "MATCH", match))
+		items, err := redis.Values(conn.Do("HSCAN", hashname, cursor, "MATCH", match))
 		if err != nil || items == nil || len(items) == 0 {
 			return matches, err
 		}
@@ -186,7 +182,7 @@ func (rdb *redisDB) ReadAllMatchingEntries(match string) (map[string]string, err
 	return matches, nil
 }
 
-func (rdb *redisDB) InsertEntry(key string, entry string) error {
+func (rdb *redisDB) InsertEntry(hashname string, key string, entry string) error {
 	var err error
 	conn := rdb.conn
 	if rdb.conn == nil {
@@ -197,11 +193,11 @@ func (rdb *redisDB) InsertEntry(key string, entry string) error {
 		defer conn.Close()
 	}
 
-	_, err = conn.Do("HSET", rdb.namespace.String(), key, entry)
+	_, err = conn.Do("HSET", hashname, key, entry)
 	return err
 }
 
-func (rdb *redisDB) DeleteEntry(key string) (int, error) {
+func (rdb *redisDB) DeleteEntry(hashname string, key string) (int, error) {
 	var err error
 	conn := rdb.conn
 	if rdb.conn == nil {
@@ -212,5 +208,5 @@ func (rdb *redisDB) DeleteEntry(key string) (int, error) {
 		defer conn.Close()
 	}
 
-	return redis.Int(conn.Do("HDEL", rdb.namespace.String(), key))
+	return redis.Int(conn.Do("HDEL", hashname, key))
 }

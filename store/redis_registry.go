@@ -21,6 +21,7 @@ import (
 
 	log "github.com/Sirupsen/logrus"
 
+	"github.com/amalgam8/registry/auth"
 	"github.com/amalgam8/registry/utils/database"
 	"github.com/amalgam8/registry/utils/logging"
 )
@@ -40,14 +41,14 @@ func NewRedisRegistry(db database.Database) ExternalRegistry {
 	return reg
 }
 
-func (rr *redisRegistry) ReadKeys() ([]string, error) {
-	return rr.db.ReadKeys()
+func (rr *redisRegistry) ReadKeys(namespace auth.Namespace) ([]string, error) {
+	return rr.db.ReadKeys(namespace.String())
 }
 
-func (rr *redisRegistry) ReadServiceInstanceByInstID(instanceID string) (*ServiceInstance, error) {
+func (rr *redisRegistry) ReadServiceInstanceByInstID(namespace auth.Namespace, instanceID string) (*ServiceInstance, error) {
 	siKey := fmt.Sprintf("%s.*", instanceID)
 
-	keys, err := rr.ListServiceInstancesByKey(siKey)
+	keys, err := rr.ListServiceInstancesByKey(namespace, siKey)
 
 	if err != nil {
 		return nil, err
@@ -66,10 +67,10 @@ func (rr *redisRegistry) ReadServiceInstanceByInstID(instanceID string) (*Servic
 	return si, nil
 }
 
-func (rr *redisRegistry) ListServiceInstancesByKey(key string) (map[string]*ServiceInstance, error) {
+func (rr *redisRegistry) ListServiceInstancesByKey(namespace auth.Namespace, key string) (map[string]*ServiceInstance, error) {
 	var matchingKeys = make(map[string]*ServiceInstance)
 
-	matches, err := rr.db.ReadAllMatchingEntries(key)
+	matches, err := rr.db.ReadAllMatchingEntries(namespace.String(), key)
 	if err != nil {
 		return matchingKeys, err
 	}
@@ -89,10 +90,10 @@ func (rr *redisRegistry) ListServiceInstancesByKey(key string) (map[string]*Serv
 	return matchingKeys, nil
 }
 
-func (rr *redisRegistry) ListAllServiceInstances() (map[string]ServiceInstanceMap, error) {
+func (rr *redisRegistry) ListAllServiceInstances(namespace auth.Namespace) (map[string]ServiceInstanceMap, error) {
 	serviceMap := make(map[string]ServiceInstanceMap)
 
-	registeredInstances, err := rr.db.ReadAllEntries()
+	registeredInstances, err := rr.db.ReadAllEntries(namespace.String())
 	if err != nil {
 		return serviceMap, err
 	}
@@ -120,14 +121,14 @@ func (rr *redisRegistry) ListAllServiceInstances() (map[string]ServiceInstanceMa
 	return serviceMap, err
 }
 
-func (rr *redisRegistry) InsertServiceInstance(instance *ServiceInstance) error {
+func (rr *redisRegistry) InsertServiceInstance(namespace auth.Namespace, instance *ServiceInstance) error {
 	// Write the JSON registration data to the database
 	instanceJSON, _ := json.Marshal(instance)
 	siKey := fmt.Sprintf("%s.%s", instance.ID, instance.ServiceName)
 
-	return rr.db.InsertEntry(siKey, string(instanceJSON))
+	return rr.db.InsertEntry(namespace.String(), siKey, string(instanceJSON))
 }
 
-func (rr *redisRegistry) DeleteServiceInstance(key string) (int, error) {
-	return rr.db.DeleteEntry(key)
+func (rr *redisRegistry) DeleteServiceInstance(namespace auth.Namespace, key string) (int, error) {
+	return rr.db.DeleteEntry(namespace.String(), key)
 }

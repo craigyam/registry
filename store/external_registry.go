@@ -16,16 +16,18 @@ package store
 
 import (
 	"fmt"
+
+	"github.com/amalgam8/registry/auth"
 )
 
 // ExternalRegistry calls to manage the instances in an external store
 type ExternalRegistry interface {
-	ReadKeys() ([]string, error)
-	ReadServiceInstanceByInstID(instanceID string) (*ServiceInstance, error)
-	ListServiceInstancesByKey(key string) (map[string]*ServiceInstance, error)
-	ListAllServiceInstances() (map[string]ServiceInstanceMap, error)
-	InsertServiceInstance(instance *ServiceInstance) error
-	DeleteServiceInstance(key string) (int, error)
+	ReadKeys(namespace auth.Namespace) ([]string, error)
+	ReadServiceInstanceByInstID(namespace auth.Namespace, instanceID string) (*ServiceInstance, error)
+	ListServiceInstancesByKey(namespace auth.Namespace, key string) (map[string]*ServiceInstance, error)
+	ListAllServiceInstances(namespace auth.Namespace) (map[string]ServiceInstanceMap, error)
+	InsertServiceInstance(namespace auth.Namespace, instance *ServiceInstance) error
+	DeleteServiceInstance(namespace auth.Namespace, key string) (int, error)
 }
 
 // DBKey represents the service instance key

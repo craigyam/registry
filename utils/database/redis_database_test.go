@@ -49,8 +49,7 @@ type ServiceInstance struct {
 
 func init() {
 	mockConn = redigomock.NewConn()
-	mockNamespace = "test"
-	db = NewRedisDBWithConn(mockConn, mockNamespace, "addr", "pass")
+	db = NewRedisDBWithConn(mockConn, "addr", "pass")
 }
 
 func TestRedisDBReadKeys(t *testing.T) {
@@ -65,7 +64,7 @@ func TestRedisDBReadKeys(t *testing.T) {
 
 	hkeyCmd := mockConn.GenericCommand("HKEYS").Expect(expectedKeys)
 
-	keys, err := db.ReadKeys()
+	keys, err := db.ReadKeys("test")
 
 	assert.Equal(t, 1, mockConn.Stats(hkeyCmd))
 	assert.NoError(t, err)
@@ -79,9 +78,9 @@ func TestRedisDBReadEntry(t *testing.T) {
 	key := "key1"
 	value := "value1"
 
-	cmd := mockConn.Command("HGET", mockNamespace.String(), key).Expect([]byte(value))
+	cmd := mockConn.Command("HGET", "test", key).Expect([]byte(value))
 
-	entry, err := db.ReadEntry(key)
+	entry, err := db.ReadEntry("test", key)
 
 	assert.Equal(t, 1, mockConn.Stats(cmd))
 	assert.NoError(t, err)
@@ -94,9 +93,9 @@ func TestRedisDBReadEntryErrorReturned(t *testing.T) {
 	key := "key1error"
 	hgetError := fmt.Errorf("Error calling HGET")
 
-	cmd := mockConn.Command("HGET", mockNamespace.String(), key).ExpectError(hgetError)
+	cmd := mockConn.Command("HGET", "test", key).ExpectError(hgetError)
 
-	_, err := db.ReadEntry(key)
+	_, err := db.ReadEntry("test", key)
 
 	assert.Equal(t, 1, mockConn.Stats(cmd))
 	assert.Error(t, err)
@@ -111,9 +110,9 @@ func TestRedisDBReadAllEntries(t *testing.T) {
 	expectedMap["key2"] = "value2"
 	expectedMap["key3"] = "value3"
 
-	hkeyCmd := mockConn.Command("HGETALL", mockNamespace.String()).ExpectMap(expectedMap)
+	hkeyCmd := mockConn.Command("HGETALL", "test").ExpectMap(expectedMap)
 
-	entries, err := db.ReadAllEntries()
+	entries, err := db.ReadAllEntries("test")
 
 	assert.Equal(t, 1, mockConn.Stats(hkeyCmd))
 	assert.NoError(t, err)
@@ -132,7 +131,7 @@ func TestRedisDBReadAllMatchingEntries(t *testing.T) {
 	s, _ := generateMockHScanCommandOutput("inst-id", si)
 	cmd := mockConn.GenericCommand("HSCAN").Expect(s)
 
-	instance, err := db.ReadAllMatchingEntries("inst-id")
+	instance, err := db.ReadAllMatchingEntries("test", "inst-id")
 	assert.NoError(t, err)
 
 	var actualSI ServiceInstance
@@ -149,9 +148,9 @@ func TestRedisDBInsertEntry(t *testing.T) {
 	key := "key1"
 	entry := "entry1"
 
-	cmd := mockConn.Command("HSET", mockNamespace.String(), key, entry).Expect(123)
+	cmd := mockConn.Command("HSET", "test", key, entry).Expect(123)
 
-	err := db.InsertEntry(key, entry)
+	err := db.InsertEntry("test", key, entry)
 
 	assert.Equal(t, 1, mockConn.Stats(cmd))
 	assert.NoError(t, err)
@@ -160,9 +159,9 @@ func TestRedisDBInsertEntry(t *testing.T) {
 func TestRedisDBDeleteEntry(t *testing.T) {
 	mockConn.Clear()
 
-	cmd := mockConn.Command("HDEL", mockNamespace.String(), "inst-id").Expect([]byte("1"))
+	cmd := mockConn.Command("HDEL", "test", "inst-id").Expect([]byte("1"))
 
-	hdel, err := db.DeleteEntry("inst-id")
+	hdel, err := db.DeleteEntry("test", "inst-id")
 
 	assert.Equal(t, 1, mockConn.Stats(cmd))
 	assert.NoError(t, err)

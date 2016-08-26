@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/amalgam8/registry/replication"
+	"github.com/amalgam8/registry/utils/database"
 )
 
 const (
@@ -32,7 +33,7 @@ const (
 )
 
 // DefaultConfig is the default configuration parameters for the registry
-var DefaultConfig = NewConfig(defaultDefaultTTL, defaultMinimumTTL, defaultMaximumTTL, defaultNamespaceCapacity, nil, nil, defaultStore, defaultStoreAddr, defaultStorePassword)
+var DefaultConfig = NewConfig(defaultDefaultTTL, defaultMinimumTTL, defaultMaximumTTL, defaultNamespaceCapacity, nil, nil, defaultStore, defaultStoreAddr, defaultStorePassword, nil)
 
 // Config encapsulates the registry configuration parameters
 type Config struct {
@@ -50,10 +51,11 @@ type Config struct {
 	Store         string
 	StoreAddr     string
 	StorePassword string
+	StoreDatabase database.Database
 }
 
 // NewConfig creates a new registry configuration according to the specified TTL values
-func NewConfig(defaultTTL, minimumTTL, maximumTTL time.Duration, namespaceCapacity int, extensions []CatalogFactory, rep replication.Replication, store string, storeAddr string, storePassword string) *Config {
+func NewConfig(defaultTTL, minimumTTL, maximumTTL time.Duration, namespaceCapacity int, extensions []CatalogFactory, rep replication.Replication, store string, storeAddr string, storePassword string, storeDatabase database.Database) *Config {
 	validate(defaultTTL, minimumTTL, maximumTTL, namespaceCapacity)
 	return &Config{
 		DefaultTTL:        defaultTTL,
@@ -66,6 +68,7 @@ func NewConfig(defaultTTL, minimumTTL, maximumTTL time.Duration, namespaceCapaci
 		Store:             store,
 		StoreAddr:         storeAddr,
 		StorePassword:     storePassword,
+		StoreDatabase:     storeDatabase,
 	}
 }
 

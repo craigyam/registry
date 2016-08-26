@@ -64,7 +64,7 @@ func setupCatalogForTest() *externalCatalog {
 
 	db := NewMockExternalRegistry(serviceInstances)
 
-	conf := &externalConfig{defaultTTL, minimumTTL, maximumTTL, 50, "redis", "testaddress", "testpassword"}
+	conf := &externalConfig{defaultTTL, minimumTTL, maximumTTL, 50, "redis", "testaddress", "testpassword", nil}
 	return createExternalCatalog(conf, db)
 }
 
@@ -195,7 +195,7 @@ func TestRedisRegisterInstanceWithCatalogTTL(t *testing.T) {
 
 	db := NewMockExternalRegistry(serviceInstances)
 
-	conf := &externalConfig{2 * DefaultConfig.DefaultTTL, minimumTTL, maximumTTL, 50, "redis", "testaddress", "testpassword"}
+	conf := &externalConfig{2 * DefaultConfig.DefaultTTL, minimumTTL, maximumTTL, 50, "redis", "testaddress", "testpassword", nil}
 	catalog := createExternalCatalog(conf, db)
 
 	si := &ServiceInstance{
@@ -433,7 +433,7 @@ func TestExternalOutOfServiceDoesNotExpire(t *testing.T) {
 
 	db := NewMockExternalRegistry(serviceInstances)
 
-	conf := &externalConfig{testShortTTL, testShortTTL, maximumTTL, 50, "redis", "testaddress", "testpassword"}
+	conf := &externalConfig{testShortTTL, testShortTTL, maximumTTL, 50, "redis", "testaddress", "testpassword", nil}
 	catalog := createExternalCatalog(conf, db)
 
 	instance1 := &ServiceInstance{
@@ -482,7 +482,7 @@ func TestExternalReRegisterExpiredInstance(t *testing.T) {
 
 	db := NewMockExternalRegistry(serviceInstances)
 
-	conf := &externalConfig{testShortTTL, testShortTTL, maximumTTL, 50, "redis", "testaddress", "testpassword"}
+	conf := &externalConfig{testShortTTL, testShortTTL, maximumTTL, 50, "redis", "testaddress", "testpassword", nil}
 	catalog := createExternalCatalog(conf, db)
 
 	instance1 := newServiceInstance("Calc", "192.168.0.1", 9080)
@@ -583,7 +583,7 @@ func TestExternalDeregisterInstanceAlreadyExpired(t *testing.T) {
 
 	db := NewMockExternalRegistry(serviceInstances)
 
-	conf := &externalConfig{testShortTTL, testShortTTL, maximumTTL, 50, "redis", "testaddress", "testpassword"}
+	conf := &externalConfig{testShortTTL, testShortTTL, maximumTTL, 50, "redis", "testaddress", "testpassword", nil}
 	catalog := createExternalCatalog(conf, db)
 
 	instance := newServiceInstance("Calc", "192.168.0.1", 9080)
@@ -644,7 +644,7 @@ func TestExternalRenewInstanceAlreadyExpired(t *testing.T) {
 
 	db := NewMockExternalRegistry(serviceInstances)
 
-	conf := &externalConfig{testShortTTL, testShortTTL, maximumTTL, 50, "redis", "testaddress", "testpassword"}
+	conf := &externalConfig{testShortTTL, testShortTTL, maximumTTL, 50, "redis", "testaddress", "testpassword", nil}
 	catalog := createExternalCatalog(conf, db)
 
 	instance := newServiceInstance("Calc", "192.168.0.1", 9080)
@@ -680,7 +680,7 @@ func TestExternalSingleServiceQuota(t *testing.T) {
 
 	db := NewMockExternalRegistry(serviceInstances)
 
-	conf := &externalConfig{testShortTTL, testShortTTL, maximumTTL, namespaceCapacity, "redis", "testaddress", "testpassword"}
+	conf := &externalConfig{testShortTTL, testShortTTL, maximumTTL, namespaceCapacity, "redis", "testaddress", "testpassword", nil}
 	catalog := createExternalCatalog(conf, db)
 
 	for i := 0; i < namespaceCapacity; i++ {
@@ -719,7 +719,7 @@ func TestExternalMultipleServicesQuota(t *testing.T) {
 
 	db := NewMockExternalRegistry(serviceInstances)
 
-	conf := &externalConfig{testShortTTL, testShortTTL, maximumTTL, namespaceCapacity, "redis", "testaddress", "testpassword"}
+	conf := &externalConfig{testShortTTL, testShortTTL, maximumTTL, namespaceCapacity, "redis", "testaddress", "testpassword", nil}
 	catalog := createExternalCatalog(conf, db)
 
 	for i := 0; i < namespaceCapacity; i++ {
@@ -758,7 +758,7 @@ func TestExternalInstancesMetrics(t *testing.T) {
 
 	db := NewMockExternalRegistry(serviceInstances)
 
-	conf := &externalConfig{testShortTTL, testShortTTL, maximumTTL, 10, "redis", "testaddress", "testpassword"}
+	conf := &externalConfig{testShortTTL, testShortTTL, maximumTTL, 10, "redis", "testaddress", "testpassword", nil}
 	catalog := createExternalCatalog(conf, db)
 
 	instancesCount := func() int64 {
@@ -933,7 +933,7 @@ func TestExternalExpirationMetric(t *testing.T) {
 
 	db := NewMockExternalRegistry(serviceInstances)
 
-	conf := &externalConfig{testShortTTL, testShortTTL, maximumTTL, 10, "redis", "testaddress", "testpassword"}
+	conf := &externalConfig{testShortTTL, testShortTTL, maximumTTL, 10, "redis", "testaddress", "testpassword", nil}
 	catalog := createExternalCatalog(conf, db)
 
 	expirationCount := func() int64 {
@@ -957,7 +957,7 @@ func TestExternalLifetimeMetric(t *testing.T) {
 
 	db := NewMockExternalRegistry(serviceInstances)
 
-	conf := &externalConfig{testShortTTL, testShortTTL, maximumTTL, 10, "redis", "testaddress", "testpassword"}
+	conf := &externalConfig{testShortTTL, testShortTTL, maximumTTL, 10, "redis", "testaddress", "testpassword", nil}
 	catalog := createExternalCatalog(conf, db)
 
 	assertLifetime := func(d time.Duration) {
@@ -1001,7 +1001,7 @@ func TestExternalMultiCatalogsMetrics(t *testing.T) {
 
 	db := NewMockExternalRegistry(serviceInstances)
 
-	conf := &externalConfig{testShortTTL, testShortTTL, maximumTTL, 10, "redis", "testaddress", "testpassword"}
+	conf := &externalConfig{testShortTTL, testShortTTL, maximumTTL, 10, "redis", "testaddress", "testpassword", nil}
 	catalog1 := createExternalCatalog(conf, db)
 	catalog2 := createExternalCatalog(conf, db)
 
@@ -1061,7 +1061,7 @@ func TestExternalInstanceExpiresCatalogTTL(t *testing.T) {
 
 	db := NewMockExternalRegistry(serviceInstances)
 
-	conf := &externalConfig{ttl, testShortTTL, maximumTTL, 10, "redis", "testaddress", "testpassword"}
+	conf := &externalConfig{ttl, testShortTTL, maximumTTL, 10, "redis", "testaddress", "testpassword", nil}
 	catalog := createExternalCatalog(conf, db)
 
 	instance := newServiceInstance("Calc", "192.168.0.1", 9080)
@@ -1102,7 +1102,7 @@ func TestExternalInstanceExpireInstanceTTL(t *testing.T) {
 
 	db := NewMockExternalRegistry(serviceInstances)
 
-	conf := &externalConfig{DefaultConfig.DefaultTTL, ttl, maximumTTL, 10, "redis", "testaddress", "testpassword"}
+	conf := &externalConfig{DefaultConfig.DefaultTTL, ttl, maximumTTL, 10, "redis", "testaddress", "testpassword", nil}
 	catalog := createExternalCatalog(conf, db)
 
 	instance := &ServiceInstance{
@@ -1150,7 +1150,7 @@ func TestExternalRegisterInstancesSameServiceConcurrently(t *testing.T) {
 
 	db := NewMockExternalRegistry(serviceInstances)
 
-	conf := &externalConfig{ttl, testShortTTL, maximumTTL, -1, "redis", "testaddress", "testpassword"}
+	conf := &externalConfig{ttl, testShortTTL, maximumTTL, -1, "redis", "testaddress", "testpassword", nil}
 	catalog := createExternalCatalog(conf, db)
 
 	var wg sync.WaitGroup
@@ -1200,7 +1200,7 @@ func TestExternalRegisterInstancesConcurrently(t *testing.T) {
 
 	db := NewMockExternalRegistry(serviceInstances)
 
-	conf := &externalConfig{ttl, testShortTTL, maximumTTL, -1, "redis", "testaddress", "testpassword"}
+	conf := &externalConfig{ttl, testShortTTL, maximumTTL, -1, "redis", "testaddress", "testpassword", nil}
 	catalog := createExternalCatalog(conf, db)
 
 	var wg sync.WaitGroup
@@ -1255,7 +1255,7 @@ func TestExternalDeregisterInstancesSameServiceConcurrently(t *testing.T) {
 
 	db := NewMockExternalRegistry(serviceInstances)
 
-	conf := &externalConfig{ttl, testShortTTL, maximumTTL, -1, "redis", "testaddress", "testpassword"}
+	conf := &externalConfig{ttl, testShortTTL, maximumTTL, -1, "redis", "testaddress", "testpassword", nil}
 	catalog := createExternalCatalog(conf, db)
 	var ids [numOfInstances]string
 
@@ -1309,7 +1309,7 @@ func TestExternalDeregisterInstancesConcurrently(t *testing.T) {
 
 	db := NewMockExternalRegistry(serviceInstances)
 
-	conf := &externalConfig{ttl, testShortTTL, maximumTTL, -1, "redis", "testaddress", "testpassword"}
+	conf := &externalConfig{ttl, testShortTTL, maximumTTL, -1, "redis", "testaddress", "testpassword", nil}
 	catalog := createExternalCatalog(conf, db)
 	var ids [numOfInstances]string
 
@@ -1365,7 +1365,7 @@ func TestExternalRenewInstancePreventExpiration(t *testing.T) {
 
 	db := NewMockExternalRegistry(serviceInstances)
 
-	conf := &externalConfig{defaultTTL, testShortTTL, maximumTTL, -1, "redis", "testaddress", "testpassword"}
+	conf := &externalConfig{defaultTTL, testShortTTL, maximumTTL, -1, "redis", "testaddress", "testpassword", nil}
 	catalog := createExternalCatalog(conf, db)
 
 	instance := newServiceInstance("Calc", "192.168.0.1", 9080)
@@ -1417,7 +1417,7 @@ func TestExternalRenewInstancesConcurrently(t *testing.T) {
 
 	db := NewMockExternalRegistry(serviceInstances)
 
-	conf := &externalConfig{ttl, testMinTTL, testMaxTTL, -1, "redis", "testaddress", "testpassword"}
+	conf := &externalConfig{ttl, testMinTTL, testMaxTTL, -1, "redis", "testaddress", "testpassword", nil}
 	catalog := createExternalCatalog(conf, db)
 
 	var ids [numOfInstances]string
@@ -1483,7 +1483,7 @@ func TestExternalRenewAndExpireInstancesConcurrently(t *testing.T) {
 
 	db := NewMockExternalRegistry(serviceInstances)
 
-	conf := &externalConfig{ttl, testMinTTL, testMaxTTL, -1, "redis", "testaddress", "testpassword"}
+	conf := &externalConfig{ttl, testMinTTL, testMaxTTL, -1, "redis", "testaddress", "testpassword", nil}
 	catalog := createExternalCatalog(conf, db)
 
 	var ids [numOfInstances]string
@@ -1547,5 +1547,5 @@ func TestExternalRenewAndExpireInstancesConcurrently(t *testing.T) {
 }
 
 func createNewExternalConfig(defaultTTL time.Duration) *externalConfig {
-	return &externalConfig{defaultTTL, testMinTTL, testMaxTTL, -1, "redis", "testaddress", "testpassword"}
+	return &externalConfig{defaultTTL, testMinTTL, testMaxTTL, -1, "redis", "testaddress", "testpassword", nil}
 }

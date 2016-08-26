@@ -39,6 +39,7 @@ type externalConfig struct {
 	store    string
 	address  string
 	password string
+	database database.Database
 }
 
 type externalFactory struct {
@@ -111,12 +112,17 @@ func newExternalCatalog(conf *externalConfig, namespace auth.Namespace, pool *re
 	var reg ExternalRegistry
 
 	if conf.store == "redis" {
-		if pool != nil {
-			db = database.NewRedisDBWithPool(namespace, pool)
+		if conf.database == nil {
+			if pool != nil {
+				db = database.NewRedisDBWithPool(pool)
+			} else {
+				db = database.NewRedisDB(conf.address, conf.password)
+			}
+			reg = NewRedisRegistry(db)
 		} else {
-			db = database.NewRedisDB(namespace, conf.address, conf.password)
+			db = conf.database
+			reg = NewRedisRegistry(conf.database)
 		}
-		reg = NewRedisRegistry(db)
 	} else {
 		return nil, fmt.Errorf("External store %s is not supported", conf.store)
 	}
@@ -137,7 +143,7 @@ func newExternalCatalog(conf *externalConfig, namespace auth.Namespace, pool *re
 	}
 
 	// Need to check if any entries in the DB have expired
-	hashKeys, _ := db.ReadKeys()
+	hashKeys, _ := db.ReadKeys(namespace.String())
 	for _, value := range hashKeys {
 		catalog.checkIfExpired(strings.Split(value, ".")[0])
 	}
@@ -193,7 +199,7 @@ func (ec *externalCatalog) Register(si *ServiceInstance) (*ServiceInstance, erro
 	defer ec.Unlock()
 
 	// Existing instances are simply overwritten, but need to take into account for capacity validation and metrics collection.
-	instance, err := ec.db.ReadServiceInstanceByInstID(instanceID)
+	instance, err := ec.db.ReadServiceInstanceByInstID(ec.namespace, instanceID)
 	if err != nil {
 		return nil, err
 	}
@@ -205,7 +211,7 @@ func (ec *externalCatalog) Register(si *ServiceInstance) (*ServiceInstance, erro
 
 	// Capacity validation - we don't check capacity for replication requests nor reregister requests
 	if !alreadyExists && ec.conf.namespaceCapacity >= 0 {
-		hashKeys, err := ec.db.ReadKeys()
+		hashKeys, err := ec.db.ReadKeys(ec.namespace)
 		if err != nil {
 			return nil, err
 		}
@@ -217,7 +223,7 @@ func (ec *externalCatalog) Register(si *ServiceInstance) (*ServiceInstance, erro
 	}
 
 	// Write the JSON registration data to the database
-	err = ec.db.InsertServiceInstance(newSI)
+	err = ec.db.InsertServiceInstance(ec.namespace, newSI)
 	if err != nil {
 		return nil, err
 	}
@@ -284,7 +290,7 @@ func (ec *externalCatalog) Renew(instanceID string) (*ServiceInstance, error) {
 	ec.Lock()
 	defer ec.Unlock()
 
-	si, err := ec.db.ReadServiceInstanceByInstID(instanceID)
+	si, err := ec.db.ReadServiceInstanceByInstID(ec.namespace, instanceID)
 	if err != nil {
 		return nil, err
 	}
@@ -293,7 +299,7 @@ func (ec *externalCatalog) Renew(instanceID string) (*ServiceInstance, error) {
 	}
 
 	si.LastRenewal = time.Now()
-	err = ec.db.InsertServiceInstance(si)
+	err = ec.db.InsertServiceInstance(ec.namespace, si)
 	if err != nil {
 		return nil, err
 	}
@@ -307,7 +313,7 @@ func (ec *externalCatalog) SetStatus(instanceID, status string) (*ServiceInstanc
 	ec.Lock()
 	defer ec.Unlock()
 
-	si, err := ec.db.ReadServiceInstanceByInstID(instanceID)
+	si, err := ec.db.ReadServiceInstanceByInstID(ec.namespace, instanceID)
 	if err != nil {
 		return nil, err
 	}
@@ -316,7 +322,7 @@ func (ec *externalCatalog) SetStatus(instanceID, status string) (*ServiceInstanc
 	}
 
 	si.Status = status
-	err = ec.db.InsertServiceInstance(si)
+	err = ec.db.InsertServiceInstance(ec.namespace, si)
 	if err != nil {
 		return nil, err
 	}
@@ -332,7 +338,7 @@ func (ec *externalCatalog) List(serviceName string, predicate Predicate) ([]*Ser
 
 	siKey := fmt.Sprintf("*.%s", serviceName)
 
-	service, err := ec.db.ListServiceInstancesByKey(siKey)
+	service, err := ec.db.ListServiceInstancesByKey(ec.namespace, siKey)
 	if err != nil {
 		return nil, err
 	}
@@ -354,7 +360,7 @@ func (ec *externalCatalog) Instance(instanceID string) (*ServiceInstance, error)
 	ec.RLock()
 	defer ec.RUnlock()
 
-	si, err := ec.db.ReadServiceInstanceByInstID(instanceID)
+	si, err := ec.db.ReadServiceInstanceByInstID(ec.namespace, instanceID)
 	if err != nil {
 		return nil, err
 	}
@@ -372,7 +378,7 @@ func (ec *externalCatalog) ListServices(predicate Predicate) []*Service {
 	serviceMap := make(map[string]ServiceInstanceMap)
 	services := make([]*Service, 0, len(serviceMap))
 
-	serviceMap, err := ec.db.ListAllServiceInstances()
+	serviceMap, err := ec.db.ListAllServiceInstances(ec.namespace)
 	if err != nil {
 		return services
 	}
@@ -392,7 +398,7 @@ func (ec *externalCatalog) checkIfExpired(instanceID string) {
 	ec.Lock()
 	defer ec.Unlock()
 
-	instance, err := ec.db.ReadServiceInstanceByInstID(instanceID)
+	instance, err := ec.db.ReadServiceInstanceByInstID(ec.namespace, instanceID)
 	if err != nil {
 		ec.logger.Debugf("Error reading instance data for instance ID %s", instanceID)
 		return
@@ -428,12 +434,12 @@ func (ec *externalCatalog) checkIfExpired(instanceID string) {
 // delete deletes the specified instanceID from the catalog internal datastructures.
 // It assumes the catalog's write-lock is acquired by the calling goroutine.
 func (ec *externalCatalog) delete(instanceID string) *ServiceInstance {
-	instance, err := ec.db.ReadServiceInstanceByInstID(instanceID)
+	instance, err := ec.db.ReadServiceInstanceByInstID(ec.namespace, instanceID)
 	if err != nil || instance.ID == "" {
 		return nil
 	}
 
-	hDel, _ := ec.db.DeleteServiceInstance(fmt.Sprintf("%s.%s", instance.ID, instance.ServiceName))
+	hDel, _ := ec.db.DeleteServiceInstance(ec.namespace, fmt.Sprintf("%s.%s", instance.ID, instance.ServiceName))
 	if hDel == 0 {
 		return nil
 	}

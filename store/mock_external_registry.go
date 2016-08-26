@@ -17,6 +17,8 @@ package store
 import (
 	"fmt"
 	"strings"
+
+	"github.com/amalgam8/registry/auth"
 )
 
 type mockExternalRegistry struct {
@@ -32,7 +34,7 @@ func NewMockExternalRegistry(mockServiceInstances map[string]*ServiceInstance) E
 	return db
 }
 
-func (mer *mockExternalRegistry) ReadKeys() ([]string, error) {
+func (mer *mockExternalRegistry) ReadKeys(namespace auth.Namespace) ([]string, error) {
 	var keys []string
 
 	for key := range mer.mockServiceInstances {
@@ -42,7 +44,7 @@ func (mer *mockExternalRegistry) ReadKeys() ([]string, error) {
 	return keys, nil
 }
 
-func (mer *mockExternalRegistry) ReadServiceInstanceByInstID(instanceID string) (*ServiceInstance, error) {
+func (mer *mockExternalRegistry) ReadServiceInstanceByInstID(namespace auth.Namespace, instanceID string) (*ServiceInstance, error) {
 	for _, instance := range mer.mockServiceInstances {
 		if instanceID == instance.ID {
 			return instance.DeepClone(), nil
@@ -52,7 +54,7 @@ func (mer *mockExternalRegistry) ReadServiceInstanceByInstID(instanceID string) 
 	return &ServiceInstance{}, nil
 }
 
-func (mer *mockExternalRegistry) ListServiceInstancesByKey(key string) (map[string]*ServiceInstance, error) {
+func (mer *mockExternalRegistry) ListServiceInstancesByKey(namespace auth.Namespace, key string) (map[string]*ServiceInstance, error) {
 	instanceID := strings.SplitN(key, ".", 2)[0]
 	serviceName := strings.SplitN(key, ".", 2)[1]
 	siMap := make(map[string]*ServiceInstance)
@@ -81,7 +83,7 @@ func (mer *mockExternalRegistry) ListServiceInstancesByKey(key string) (map[stri
 	return siMap, nil
 }
 
-func (mer *mockExternalRegistry) ListAllServiceInstances() (map[string]ServiceInstanceMap, error) {
+func (mer *mockExternalRegistry) ListAllServiceInstances(namespace auth.Namespace) (map[string]ServiceInstanceMap, error) {
 	// Sort the instances by service name
 	serviceList := make(map[string][]*ServiceInstance)
 	for _, instance := range mer.mockServiceInstances {
@@ -101,13 +103,13 @@ func (mer *mockExternalRegistry) ListAllServiceInstances() (map[string]ServiceIn
 	return serviceInstances, nil
 }
 
-func (mer *mockExternalRegistry) InsertServiceInstance(instance *ServiceInstance) error {
+func (mer *mockExternalRegistry) InsertServiceInstance(namespace auth.Namespace, instance *ServiceInstance) error {
 	si := instance.DeepClone()
 	mer.mockServiceInstances[fmt.Sprintf("%s.%s", instance.ID, instance.ServiceName)] = si
 	return nil
 }
 
-func (mer *mockExternalRegistry) DeleteServiceInstance(key string) (int, error) {
+func (mer *mockExternalRegistry) DeleteServiceInstance(namespace auth.Namespace, key string) (int, error) {
 	var count int
 
 	// Don't need to loop to delete, but need a count of instances deleted

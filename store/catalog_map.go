@@ -66,6 +66,7 @@ func New(conf *Config) CatalogMap {
 			store:             conf.Store,
 			address:           conf.StoreAddr,
 			password:          conf.StorePassword,
+			database:          conf.StoreDatabase,
 		}
 		externalFactory := newExternalFactory(externalConfig)
 		factory = externalFactory
