@@ -90,9 +90,12 @@ func (rr *redisRegistry) ListServiceInstancesByKey(key string) (map[string]*Serv
 }
 
 func (rr *redisRegistry) ListAllServiceInstances() (map[string]ServiceInstanceMap, error) {
-	registeredInstances, err := rr.db.ReadAllEntries()
-
 	serviceMap := make(map[string]ServiceInstanceMap)
+
+	registeredInstances, err := rr.db.ReadAllEntries()
+	if err != nil {
+		return serviceMap, err
+	}
 
 	// Create map with all of the unique service names
 	for key, instance := range registeredInstances {

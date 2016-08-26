@@ -1549,22 +1549,3 @@ func TestExternalRenewAndExpireInstancesConcurrently(t *testing.T) {
 func createNewExternalConfig(defaultTTL time.Duration) *externalConfig {
 	return &externalConfig{defaultTTL, testMinTTL, testMaxTTL, -1, "redis", "testaddress", "testpassword"}
 }
-
-// This function is used instead of the assert.Contains because the instance
-// is NOT exactly the same in the replicated catalogs due to the LastRenewal field
-/*func assertRedisContainsInstance(t *testing.T, instances []*ServiceInstance, si *ServiceInstance) bool {
-
-	// A non-nil array contains the nil instance
-	if si == nil {
-		return true
-	}
-
-	for _, inst := range instances {
-		if inst.ID == si.ID {
-			return assertSameInstance(t, si, inst)
-		}
-	}
-
-	return assert.Fail(t, "expected instance %v doesn't exist within %v", si, instances)
-
-}*/

@@ -75,29 +75,33 @@ func NewRedisDBWithPool(namespace auth.Namespace, pool *redis.Pool) Database {
 
 }
 
-func (rdb *redisDB) connect() redis.Conn {
+func (rdb *redisDB) connect() (redis.Conn, error) {
 	var conn redis.Conn
 	if rdb.pool == nil {
 		// Connect to Redis
 		conn, err := redis.Dial("tcp", rdb.address)
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
 		_, err = conn.Do("AUTH", rdb.password)
 		if err != nil {
 			conn.Close()
-			panic(err)
+			return nil, err
 		}
 	} else {
 		conn = rdb.pool.Get()
 	}
-	return conn
+	return conn, nil
 }
 
 func (rdb *redisDB) ReadKeys() ([]string, error) {
+	var err error
 	conn := rdb.conn
 	if rdb.conn == nil {
-		conn = rdb.connect()
+		conn, err = rdb.connect()
+		if err != nil {
+			return nil, err
+		}
 		defer conn.Close()
 	}
 
@@ -107,9 +111,13 @@ func (rdb *redisDB) ReadKeys() ([]string, error) {
 }
 
 func (rdb *redisDB) ReadEntry(key string) (string, error) {
+	var err error
 	conn := rdb.conn
 	if rdb.conn == nil {
-		conn = rdb.connect()
+		conn, err = rdb.connect()
+		if err != nil {
+			return "", err
+		}
 		defer conn.Close()
 	}
 
@@ -119,9 +127,13 @@ func (rdb *redisDB) ReadEntry(key string) (string, error) {
 }
 
 func (rdb *redisDB) ReadAllEntries() (map[string]string, error) {
+	var err error
 	conn := rdb.conn
 	if rdb.conn == nil {
-		conn = rdb.connect()
+		conn, err = rdb.connect()
+		if err != nil {
+			return nil, err
+		}
 		defer conn.Close()
 	}
 
@@ -131,9 +143,13 @@ func (rdb *redisDB) ReadAllEntries() (map[string]string, error) {
 }
 
 func (rdb *redisDB) ReadAllMatchingEntries(match string) (map[string]string, error) {
+	var err error
 	conn := rdb.conn
 	if rdb.conn == nil {
-		conn = rdb.connect()
+		conn, err = rdb.connect()
+		if err != nil {
+			return nil, err
+		}
 		defer conn.Close()
 	}
 
@@ -171,20 +187,28 @@ func (rdb *redisDB) ReadAllMatchingEntries(match string) (map[string]string, err
 }
 
 func (rdb *redisDB) InsertEntry(key string, entry string) error {
+	var err error
 	conn := rdb.conn
 	if rdb.conn == nil {
-		conn = rdb.connect()
+		conn, err = rdb.connect()
+		if err != nil {
+			return err
+		}
 		defer conn.Close()
 	}
 
-	_, err := conn.Do("HSET", rdb.namespace.String(), key, entry)
+	_, err = conn.Do("HSET", rdb.namespace.String(), key, entry)
 	return err
 }
 
 func (rdb *redisDB) DeleteEntry(key string) (int, error) {
+	var err error
 	conn := rdb.conn
 	if rdb.conn == nil {
-		conn = rdb.connect()
+		conn, err = rdb.connect()
+		if err != nil {
+			return 0, err
+		}
 		defer conn.Close()
 	}
 
