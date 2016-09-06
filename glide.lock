@@ -1,5 +1,5 @@
 hash: 584ffd90fb006402f5118ceb1d9eef7300a33d2ac17869191ae9e28f80f27a73
-updated: 2016-09-06T22:51:41.767790487+03:00
+updated: 2016-09-06T23:11:32.75314982+03:00
 imports:
 - name: github.com/ant0ine/go-json-rest
   version: bd5fcdd7b0b7e63f4abb171498784efbd01fda7b
