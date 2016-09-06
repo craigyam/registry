@@ -21,9 +21,9 @@ const (
 // Database functions to manage data stored in an external database
 type Database interface {
 	ReadKeys(hashname string) ([]string, error)
-	ReadEntry(hashname string, key string) (string, error)
+	ReadEntry(hashname string, key string) ([]byte, error)
 	ReadAllEntries(hashname string) (map[string]string, error)
-	ReadAllMatchingEntries(hashname string, match string) (map[string]string, error)
-	InsertEntry(hashname string, key string, entry string) error
+	ReadAllMatchingEntries(hashname string, match string) (map[string][]byte, error)
+	InsertEntry(hashname string, key string, entry []byte) error
 	DeleteEntry(hashname string, key string) (int, error)
 }

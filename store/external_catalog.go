@@ -143,10 +143,12 @@ func newExternalCatalog(conf *externalConfig, namespace auth.Namespace, pool *re
 	}
 
 	// Need to check if any entries in the DB have expired
-	hashKeys, _ := db.ReadKeys(namespace.String())
-	for _, value := range hashKeys {
-		catalog.checkIfExpired(strings.Split(value, ".")[0])
-	}
+	go func(namespace auth.Namespace, db database.Database, catalog *externalCatalog) {
+		hashKeys, _ := db.ReadKeys(namespace.String())
+		for _, value := range hashKeys {
+			catalog.checkIfExpired(strings.Split(string(value), ".")[0])
+		}
+	}(namespace, db, catalog)
 
 	return catalog, nil
 }

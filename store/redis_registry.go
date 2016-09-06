@@ -62,6 +62,7 @@ func (rr *redisRegistry) ReadServiceInstanceByInstID(namespace auth.Namespace, i
 	var si *ServiceInstance
 	for _, value := range keys {
 		si = value.DeepClone()
+		break
 	}
 
 	return si, nil
@@ -75,9 +76,9 @@ func (rr *redisRegistry) ListServiceInstancesByKey(namespace auth.Namespace, key
 		return matchingKeys, err
 	}
 
-	for key, siString := range matches {
+	for key, siBytes := range matches {
 		var si ServiceInstance
-		err := json.Unmarshal([]byte(siString), &si)
+		err := json.Unmarshal(siBytes, &si)
 		if err != nil {
 			// Log an error, but continue with empty SI
 			rr.logger.WithFields(log.Fields{
@@ -126,7 +127,7 @@ func (rr *redisRegistry) InsertServiceInstance(namespace auth.Namespace, instanc
 	instanceJSON, _ := json.Marshal(instance)
 	siKey := fmt.Sprintf("%s.%s", instance.ID, instance.ServiceName)
 
-	return rr.db.InsertEntry(namespace.String(), siKey, string(instanceJSON))
+	return rr.db.InsertEntry(namespace.String(), siKey, instanceJSON)
 }
 
 func (rr *redisRegistry) DeleteServiceInstance(namespace auth.Namespace, key string) (int, error) {

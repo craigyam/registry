@@ -998,12 +998,14 @@ func TestExternalMultiCatalogsMetrics(t *testing.T) {
 	metrics.DefaultRegistry.UnregisterAll()
 
 	serviceInstances := make(map[string]*ServiceInstance)
+	serviceInstances2 := make(map[string]*ServiceInstance)
 
 	db := NewMockExternalRegistry(serviceInstances)
+	db2 := NewMockExternalRegistry(serviceInstances2)
 
 	conf := &externalConfig{testShortTTL, testShortTTL, maximumTTL, 10, "redis", "testaddress", "testpassword", nil}
 	catalog1 := createExternalCatalog(conf, db)
-	catalog2 := createExternalCatalog(conf, db)
+	catalog2 := createExternalCatalog(conf, db2)
 
 	instancesCount := func() int64 {
 		return metrics.DefaultRegistry.Get(instancesMetricName).(metrics.Counter).Count()

@@ -182,7 +182,7 @@ var Flags = []cli.Flag{
 		Name:   StoreFlag,
 		EnvVar: envVarFromFlag(StoreFlag),
 		Value:  "inmem",
-		Usage:  "Backing store",
+		Usage:  "Backing store. Supported values are: 'inmem', 'redis'",
 	},
 
 	cli.StringFlag{

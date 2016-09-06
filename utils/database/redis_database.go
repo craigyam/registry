@@ -31,15 +31,7 @@ type redisDB struct {
 
 // NewRedisDB returns an instance of a Redis database
 func NewRedisDB(address string, password string) Database {
-	db := &redisDB{
-		conn:     nil,
-		pool:     nil,
-		address:  address,
-		password: password,
-		logger:   logging.GetLogger(module),
-	}
-
-	return db
+	return NewRedisDBWithConn(nil, address, password)
 }
 
 // NewRedisDBWithConn returns an instance of a Redis database using an existing connection
@@ -106,18 +98,18 @@ func (rdb *redisDB) ReadKeys(hashname string) ([]string, error) {
 	return hashKeys, err
 }
 
-func (rdb *redisDB) ReadEntry(hashname string, key string) (string, error) {
+func (rdb *redisDB) ReadEntry(hashname string, key string) ([]byte, error) {
 	var err error
 	conn := rdb.conn
 	if rdb.conn == nil {
 		conn, err = rdb.connect()
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		defer conn.Close()
 	}
 
-	entry, err := redis.String(conn.Do("HGET", hashname, key))
+	entry, err := redis.Bytes(conn.Do("HGET", hashname, key))
 
 	return entry, err
 }
@@ -138,7 +130,7 @@ func (rdb *redisDB) ReadAllEntries(hashname string) (map[string]string, error) {
 	return entries, err
 }
 
-func (rdb *redisDB) ReadAllMatchingEntries(hashname string, match string) (map[string]string, error) {
+func (rdb *redisDB) ReadAllMatchingEntries(hashname string, match string) (map[string][]byte, error) {
 	var err error
 	conn := rdb.conn
 	if rdb.conn == nil {
@@ -151,9 +143,9 @@ func (rdb *redisDB) ReadAllMatchingEntries(hashname string, match string) (map[s
 
 	var (
 		cursor int64
-		keys   []string
+		keys   [][]byte
 	)
-	var matches = make(map[string]string)
+	var matches = make(map[string][]byte)
 
 	for {
 		items, err := redis.Values(conn.Do("HSCAN", hashname, cursor, "MATCH", match))
@@ -172,7 +164,7 @@ func (rdb *redisDB) ReadAllMatchingEntries(hashname string, match string) (map[s
 			if i+1 > len(keys) {
 				break
 			}
-			matches[keys[i]] = keys[i+1]
+			matches[string(keys[i])] = keys[i+1]
 			i++
 		}
 		if cursor == 0 {
@@ -182,7 +174,7 @@ func (rdb *redisDB) ReadAllMatchingEntries(hashname string, match string) (map[s
 	return matches, nil
 }
 
-func (rdb *redisDB) InsertEntry(hashname string, key string, entry string) error {
+func (rdb *redisDB) InsertEntry(hashname string, key string, entry []byte) error {
 	var err error
 	conn := rdb.conn
 	if rdb.conn == nil {

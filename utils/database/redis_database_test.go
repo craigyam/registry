@@ -20,15 +20,39 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rafaeljusto/redigomock"
 	"github.com/stretchr/testify/assert"
-
-	"github.com/amalgam8/registry/auth"
+	"github.com/stretchr/testify/mock"
 )
 
-var mockConn *redigomock.Conn
-var db Database
-var mockNamespace auth.Namespace
+// Mock the connection object
+type MockedConn struct {
+	mock.Mock
+}
+
+func (c *MockedConn) Do(commandName string, args ...interface{}) (reply interface{}, err error) {
+	margs := c.Called(commandName, args)
+	return margs.Get(0), margs.Error(1)
+}
+
+func (c *MockedConn) Close() error {
+	return nil
+}
+
+func (c *MockedConn) Err() error {
+	return nil
+}
+
+func (c *MockedConn) Flush() error {
+	return nil
+}
+
+func (c *MockedConn) Receive() (reply interface{}, err error) {
+	return nil, nil
+}
+
+func (c *MockedConn) Send(commandName string, args ...interface{}) error {
+	return nil
+}
 
 type Endpoint struct {
 	Type  string
@@ -47,14 +71,7 @@ type ServiceInstance struct {
 	Extension        map[string]interface{}
 }
 
-func init() {
-	mockConn = redigomock.NewConn()
-	db = NewRedisDBWithConn(mockConn, "addr", "pass")
-}
-
 func TestRedisDBReadKeys(t *testing.T) {
-	mockConn.Clear()
-
 	var expectedKeys []interface{}
 	expectedKeys = append(expectedKeys, []byte("key1"))
 	expectedKeys = append(expectedKeys, []byte("key2"))
@@ -62,74 +79,87 @@ func TestRedisDBReadKeys(t *testing.T) {
 
 	expectedStrings := []string{"key1", "key2", "key3"}
 
-	hkeyCmd := mockConn.GenericCommand("HKEYS").Expect(expectedKeys)
+	mockedConn := new(MockedConn)
+	db := NewRedisDBWithConn(mockedConn, "addr", "pass")
+
+	mockedConn.On("Do", "HKEYS", []interface{}{"test"}).Return(expectedKeys, nil)
 
 	keys, err := db.ReadKeys("test")
 
-	assert.Equal(t, 1, mockConn.Stats(hkeyCmd))
 	assert.NoError(t, err)
 	assert.NotNil(t, keys)
 	assert.Equal(t, expectedStrings, keys)
 }
 
 func TestRedisDBReadEntry(t *testing.T) {
-	mockConn.Clear()
-
 	key := "key1"
-	value := "value1"
+	value := []byte("value1")
+	expectedValue := []byte("value1")
 
-	cmd := mockConn.Command("HGET", "test", key).Expect([]byte(value))
+	mockedConn := new(MockedConn)
+	db := NewRedisDBWithConn(mockedConn, "addr", "pass")
+
+	mockedConn.On("Do", "HGET", []interface{}{"test", key}).Return([]byte(value), nil)
 
 	entry, err := db.ReadEntry("test", key)
 
-	assert.Equal(t, 1, mockConn.Stats(cmd))
 	assert.NoError(t, err)
-	assert.Equal(t, value, entry)
+	assert.Equal(t, expectedValue, entry)
 }
 
 func TestRedisDBReadEntryErrorReturned(t *testing.T) {
-	mockConn.Clear()
-
 	key := "key1error"
 	hgetError := fmt.Errorf("Error calling HGET")
 
-	cmd := mockConn.Command("HGET", "test", key).ExpectError(hgetError)
+	mockedConn := new(MockedConn)
+	db := NewRedisDBWithConn(mockedConn, "addr", "pass")
+
+	mockedConn.On("Do", "HGET", []interface{}{"test", key}).Return(nil, hgetError)
 
 	_, err := db.ReadEntry("test", key)
 
-	assert.Equal(t, 1, mockConn.Stats(cmd))
 	assert.Error(t, err)
 	assert.Equal(t, hgetError, err)
 }
 
 func TestRedisDBReadAllEntries(t *testing.T) {
-	mockConn.Clear()
-
 	expectedMap := make(map[string]string)
 	expectedMap["key1"] = "value1"
 	expectedMap["key2"] = "value2"
 	expectedMap["key3"] = "value3"
 
-	hkeyCmd := mockConn.Command("HGETALL", "test").ExpectMap(expectedMap)
+	var expectedValues []interface{}
+	expectedValues = append(expectedValues, []byte("key1"))
+	expectedValues = append(expectedValues, []byte("value1"))
+	expectedValues = append(expectedValues, []byte("key2"))
+	expectedValues = append(expectedValues, []byte("value2"))
+	expectedValues = append(expectedValues, []byte("key3"))
+	expectedValues = append(expectedValues, []byte("value3"))
+
+	mockedConn := new(MockedConn)
+	db := NewRedisDBWithConn(mockedConn, "addr", "pass")
+
+	mockedConn.On("Do", "HGETALL", []interface{}{"test"}).Return(expectedValues, nil)
 
 	entries, err := db.ReadAllEntries("test")
 
-	assert.Equal(t, 1, mockConn.Stats(hkeyCmd))
 	assert.NoError(t, err)
 	assert.NotNil(t, entries)
 	assert.Equal(t, expectedMap, entries)
 }
 
 func TestRedisDBReadAllMatchingEntries(t *testing.T) {
-	mockConn.Clear()
-
 	si := &ServiceInstance{
 		ServiceName: "Calc",
 		Endpoint:    &Endpoint{Value: "192.168.0.1", Type: "tcp"},
 	}
 
+	mockedConn := new(MockedConn)
+	db := NewRedisDBWithConn(mockedConn, "addr", "pass")
+
 	s, _ := generateMockHScanCommandOutput("inst-id", si)
-	cmd := mockConn.GenericCommand("HSCAN").Expect(s)
+
+	mockedConn.On("Do", "HSCAN", []interface{}{"test", int64(0), "MATCH", "inst-id"}).Return(s, nil)
 
 	instance, err := db.ReadAllMatchingEntries("test", "inst-id")
 	assert.NoError(t, err)
@@ -137,33 +167,32 @@ func TestRedisDBReadAllMatchingEntries(t *testing.T) {
 	var actualSI ServiceInstance
 	err = json.Unmarshal([]byte(instance["inst-id"]), &actualSI)
 
-	assert.Equal(t, 1, mockConn.Stats(cmd))
 	assert.Equal(t, "inst-id", actualSI.ID)
 	assert.Equal(t, "Calc", actualSI.ServiceName)
 }
 
 func TestRedisDBInsertEntry(t *testing.T) {
-	mockConn.Clear()
-
 	key := "key1"
-	entry := "entry1"
+	entry := []byte("entry1")
 
-	cmd := mockConn.Command("HSET", "test", key, entry).Expect(123)
+	mockedConn := new(MockedConn)
+	db := NewRedisDBWithConn(mockedConn, "addr", "pass")
+
+	mockedConn.On("Do", "HSET", []interface{}{"test", key, entry}).Return(123, nil)
 
 	err := db.InsertEntry("test", key, entry)
 
-	assert.Equal(t, 1, mockConn.Stats(cmd))
 	assert.NoError(t, err)
 }
 
 func TestRedisDBDeleteEntry(t *testing.T) {
-	mockConn.Clear()
+	mockedConn := new(MockedConn)
+	db := NewRedisDBWithConn(mockedConn, "addr", "pass")
 
-	cmd := mockConn.Command("HDEL", "test", "inst-id").Expect([]byte("1"))
+	mockedConn.On("Do", "HDEL", []interface{}{"test", "inst-id"}).Return([]byte("1"), nil)
 
 	hdel, err := db.DeleteEntry("test", "inst-id")
 
-	assert.Equal(t, 1, mockConn.Stats(cmd))
 	assert.NoError(t, err)
 	assert.Equal(t, 1, hdel)
 }

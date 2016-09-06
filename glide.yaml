@@ -45,6 +45,3 @@ import:
 
 - package: github.com/garyburd/redigo
   version: 1.0.0
-
-- package: github.com/rafaeljusto/redigomock
-  version: 2.0

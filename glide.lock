@@ -1,5 +1,5 @@
-hash: 9ef83a4ed33b04461b7a5add1a440231a754f7cbbd4dbf826d1d098c2af8d64d
-updated: 2016-08-24T21:17:08.906146976+03:00
+hash: 584ffd90fb006402f5118ceb1d9eef7300a33d2ac17869191ae9e28f80f27a73
+updated: 2016-09-06T22:51:41.767790487+03:00
 imports:
 - name: github.com/ant0ine/go-json-rest
   version: bd5fcdd7b0b7e63f4abb171498784efbd01fda7b
@@ -22,8 +22,6 @@ imports:
   - i18n/bundle
   - i18n/language
   - i18n/translation
-- name: github.com/rafaeljusto/redigomock
-  version: ca49a8af34fc0c903a37409317576da14b3f1cbd
 - name: github.com/rcrowley/go-metrics
   version: 1ce93efbc8f9c568886b2ef85ce305b2217b3de3
 - name: github.com/Sirupsen/logrus
